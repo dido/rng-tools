@@ -275,17 +275,19 @@ static void *thread_entropy_task(void *data)
 		goto out;
 	}
 
+	/*
+	 * Use setjmp here to allow us to return early from
+	 * jent_read_entropy, as it can run for a long time
+	 */
+	message(LOG_DEBUG|LOG_INFO, "cpu %d registers its setjmp handler\n", me->core_id);
+	if (sigsetjmp(me->jmpbuf, 1)) {
+		message(LOG_DEBUG|LOG_INFO, "cpu %d returns from setjmp for exit\n", me->core_id);
+		goto out_interrupt;
+	}
+
 	/* Now go to sleep until there is more work to do */
 	do {
 		message(LOG_DAEMON|LOG_DEBUG, "JITTER thread on cpu %d wakes up for refill\n", me->core_id);
-
-		/*
- 		 * Use setjmp here to allow us to return early from
- 		 * jent_read_entropy, as it can run for a long time
- 		 */
-		if (sigsetjmp(me->jmpbuf, 1)) {
-			break;
-		}
 
 		/* We are awake because we need to refil the buffer */
 		clock_gettime(CLOCK_REALTIME, &start);
@@ -320,6 +322,7 @@ static void *thread_entropy_task(void *data)
 
 	} while (me->active);
 
+out_interrupt:
 	free(tmpbuf);
 out:
 	me->done = 1;
