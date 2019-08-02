@@ -47,6 +47,7 @@ struct thread_data {
 	int slpmode;
 	int active;
 	int done;
+	int stuck;
 	struct timespec slptm;
 };
 
@@ -265,6 +266,10 @@ static void *thread_entropy_task(void *data)
 
 	/* Now go to sleep until there is more work to do */
 	do {
+		if (me->stuck) {
+			message(LOG_DAEMON|LOG_DEBUG, "JITTER thread on cpu %d reported stuck, exiting\n", me->core_id);
+			break;
+		}
 		message(LOG_DAEMON|LOG_DEBUG, "JITTER thread on cpu %d wakes up for refill\n", me->core_id);
 
 		/* We are awake because we need to refil the buffer */
@@ -349,6 +354,9 @@ int init_jitter_entropy_source(struct rng *ent_src)
 #ifdef HAVE_LIBGCRYPT
 	char key[AES_BLOCK];
 #endif
+	struct timeval start, end;
+	int num_active=0;
+	int startup_timeout;
 	int ret = jent_entropy_init();
 	if(ret) {
 		message(LOG_DAEMON|LOG_WARNING, "JITTER rng fails with code %d\n", ret);
@@ -420,10 +428,28 @@ int init_jitter_entropy_source(struct rng *ent_src)
 	cpus = NULL;
 
 	/* Make sure all our threads are doing their jobs */
+	startup_timeout = ent_src->rng_options[JITTER_OPT_STARTUP_TIMEOUT].int_val;
+	gettimeofday(&start, NULL);
 	for (i=0; i < num_threads; i++) {
-		while (tdata[i].active == 0)
+		while (tdata[i].active == 0) {
 			sched_yield();
-		message(LOG_DAEMON|LOG_DEBUG, "CPU Thread %d is ready\n", i);
+			gettimeofday(&end, NULL);
+			if (!tdata[i].active & ((end.tv_sec - start.tv_sec) > startup_timeout)) {
+				message(LOG_DAEMON|LOG_DEBUG, "CPU Thread %d is stuck, skipping\n", i);
+				tdata[i].stuck = 1;
+				break;
+			}
+		}
+		if (!tdata[i].stuck) {
+			message(LOG_DAEMON|LOG_DEBUG, "CPU Thread %d is ready\n", i);
+			num_active++;
+		}
+	}
+
+	if (!num_active) {
+		message(LOG_DAEMON|LOG_ERR, "No threads started, disabling JITTER\n");
+		close_jitter_entropy_source(ent_src);
+		return 1;
 	}
 
 	flags = fcntl(pipefds[0], F_GETFL, 0);
