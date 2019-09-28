@@ -27,10 +27,14 @@ if JITTER
 rngd_SOURCES	+= rngd_jitter.c
 endif
 
-rngd_LDADD	= librngd.a -lsysfs $(LIBS) ${libp11_LIBS} ${libcrypto_LIBS} ${libcurl_LIBS} ${libxml2_LIBS} ${openssl_LIBS} $(PTHREAD_LIBS)
+rngd_LDADD	= librngd.a -lsysfs $(LIBS) ${libp11_LIBS} ${libcrypto_LIBS} ${libcurl_LIBS} ${libxml2_LIBS} ${openssl_LIBS} $(PTHREAD_LIBS) ${WIRINGPI_LIBS}
 
 if PKCS11 
 rngd_SOURCES	+= rngd_pkcs11.c
+endif
+
+if GPIORNG
+rngd_SOURCES	+= rngd_gpio.c
 endif
 
 rngd_CFLAGS	= ${pkcs11_CFLAGS} ${libp11_CFLAGS} ${libcrypto_CFLAGS} ${libxml2_CFLAGS} ${openssl_CFLAGS} $(PTHREAD_CFLAGS)
