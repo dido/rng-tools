@@ -54,6 +54,11 @@ extern void cache_jitter_entropy_data(struct rng *);
 extern int init_pkcs11_entropy_source(struct rng *);
 extern void close_pkcs11_entropy_source(struct rng *);
 #endif
+#ifdef HAVE_GPIORNG
+extern int init_gpiorng_entropy_source(struct rng *);
+extern void close_gpiorng_entropy_source(struct rng *);
+#endif
+
 
 extern int init_tpm_entropy_source(struct rng *);
 
@@ -73,6 +78,10 @@ extern int xread_jitter(void *buf, size_t size, struct rng *ent_src);
 
 #ifdef HAVE_PKCS11
 extern int xread_pkcs11(void *buf, size_t size, struct rng *ent_src);
+#endif
+
+#ifdef HAVE_GPIORNG
+extern int xread_gpiorng(void *buf, size_t size, struct rng *ent_src);
 #endif
 
 extern int xread_nist(void *buf, size_t size, struct rng *ent_src);
