@@ -47,6 +47,13 @@ AC_ARG_WITH([pkcs11],
 	[with_pkcs11=check]
 )
 
+AC_ARG_WITH([gpiorng],
+	AS_HELP_STRING([--without-gpiorng],
+		[Disable GPIO RNG support. ]).
+		[],
+		[with_gpiorng=no]
+)
+
 AC_ARG_WITH([libargp],
 	AS_HELP_STRING([--without-libargp],
 		[Disable libargp support. Systems whose libc lacks argp can use libargp instead. (Default: check if libc lacks argp)]),
@@ -114,8 +121,22 @@ AS_IF(
 	]
 )
 
+AS_IF(
+	[ test "x$with_gpiorng" != "xno"],
+	[
+		AC_CHECK_HEADERS(wiringPi.h,, AC_MSG_ERROR([libwiringPi is required for GPIO RNG]))
+		AC_CHECK_LIB(wiringPi, wiringPiSetup, WIRINGPI_LIBS=-lwiringPi)
+		if test "$WIRINGPI_LIBS" != ""; then
+		   AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIO RNG])
+		else
+		   AC_MSG_ERROR([libwiringPi is required for GPIO RNG])
+		fi
+	]
+)
+
 AM_CONDITIONAL([NISTBEACON], [test "x$with_nistbeacon" != "xno"])
 AM_CONDITIONAL([PKCS11], [test "x$with_pkcs11" != "xno"])
+AM_CONDITIONAL([GPIORNG], [test "x$with_gpiorng" != "xno"])
 
 dnl Checks for header files.
 dnl AC_HEADER_STDC
