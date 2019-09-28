@@ -98,10 +98,19 @@ enum {
 	PKCS11_OPT_CHUNK = 1,
 };
 
+/*
+ * GPIO options
+ */
+enum {
+  GPIO_OPT_PIN = 0,
+  GPIO_OPT_VNLEVEL = 1
+};
+
 enum option_val_type {
 	VAL_INT = 0,
 	VAL_STRING = 1,
 };
+
 
 struct rng_option { 
 	char *key;
