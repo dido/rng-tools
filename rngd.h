@@ -102,8 +102,10 @@ enum {
  * GPIO options
  */
 enum {
-  GPIO_OPT_PIN = 0,
-  GPIO_OPT_VNLEVEL = 1
+  GPIO_OPT_AES = 0,		/* Use AES for debiasing */
+  GPIO_OPT_DATA_PIN = 1,	/* Pin for GPIO data */
+  GPIO_OPT_EN_PIN = 2,		/* Pin for RNG enable */
+  GPIO_OPT_VL_PIN = 3		/* Pin for RNG voltage level */
 };
 
 enum option_val_type {
