@@ -84,6 +84,32 @@ static unsigned int gpio_bytes(struct rng *ent_src, void *ptr,
   return(rcount);
 }
 
+/* Von Neumann whitening. Used when AES/libgcrypt is disabled */
+static unsigned int gpio_vnbytes(struct rng *ent_src, void *ptr,
+			       unsigned int count)
+{
+  unsigned char *cptr = (unsigned char *)ptr;
+  int bits, bit1, bit2;
+  unsigned int rcount=0;
+
+  while (count--) {
+    for (bits=0; bits<8; bits++) {
+      *cptr <<= 1;
+      do {
+	bit1 = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
+	bit2 = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
+      } while (bit1 == bit2);
+      if (bit1)
+	*cptr |= 0x01;
+      else
+	*cptr &= 0xfe;
+    }
+    cptr++;
+    rcount++;
+  }
+  return(rcount);
+}
+
 static int init_gcrypt(const void *key)
 {
 #ifdef HAVE_LIBGCRYPT
