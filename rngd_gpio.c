@@ -29,6 +29,7 @@
 #include "rngd_entsource.h"
 #include <wiringPi.h>
 #include <time.h>
+#include <math.h>
 
 /* Default RNG data pin */
 #define GPIO_DATA_PIN 16
@@ -47,6 +48,29 @@
    given the circuit components used, but it is by default set to 60 ms
    to be safe. */
 #define VLOW_TIMEOUT 60000000L
+
+/* Number of times to repeat self-test */
+#define SELFTEST_COUNT 16
+
+/* Threshold for entropy. If entropy is below this level, we consider the RNG
+   circuit failed. */
+#define ENT_THRESHOLD 0.8
+
+#define log2of10 3.32192809488736234787
+
+#define LOG2(x) (log2of10 * log10(x))
+
+#ifdef HAVE_LIBGCRYPT
+
+#define MIN_GCRYPT_VERSION "1.0.0"
+
+#define GCRY_HASH_ALG GCRY_MD_SHA256
+#define HASH_DLEN 64
+
+static gcry_cipher_hd_t gcry_cipher_hd;
+static gcry_md_hd_t gcry_hash_hd;
+
+#endif
 
 /* Enable the GPIO random number generator */
 static void gpio_enable(struct rng *ent_src)
@@ -84,7 +108,8 @@ static unsigned int gpio_bytes(struct rng *ent_src, void *ptr,
   return(rcount);
 }
 
-/* Von Neumann whitening. Used when AES/libgcrypt is disabled */
+/* Von Neumann whitening. Used when AES/libgcrypt is disabled. We might want
+   to consider other algorithms to do this in the future. */
 static unsigned int gpio_vnbytes(struct rng *ent_src, void *ptr,
 			       unsigned int count)
 {
@@ -110,7 +135,7 @@ static unsigned int gpio_vnbytes(struct rng *ent_src, void *ptr,
   return(rcount);
 }
 
-static int init_gcrypt(const void *key)
+static int init_gcrypt(void)
 {
 #ifdef HAVE_LIBGCRYPT
   gcry_error_t gcry_error;
@@ -122,25 +147,19 @@ static int init_gcrypt(const void *key)
     return(1);
   }
 
-  gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
-				GCRY_CIPHER_MODE_CBC, 0);
-
-  if (!gcry_error)
-    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, key, AES_BLOCK);
+  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_HASH_ALG, GCRY_MD_FLAG_SECURE);
 
   if (!gcry_error) {
-    /*
-     * Only need the first 16 bytes of iv_buf. AES-NI can
-     * encrypt multiple blocks in parallel but we can't.
-     */
-    gcry_error = gcry_cipher_setiv(gcry_cipher_hd, iv_buf, AES_BLOCK);
+    gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
+				  GCRY_CIPHER_MODE_CBC, 0);
   }
 
   if (gcry_error) {
     message(LOG_DAEMON|LOG_ERR,
-	    "could not set key or IV: %s\n",
+	    "could not initialise gcrypt: %s\n",
 	    gcry_strerror(gcry_error));
     gcry_cipher_close(gcry_cipher_hd);
+    gcry_md_close(gcry_md_hd);
     return(1);
   }
   return(0);
@@ -194,7 +213,11 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   int pin = ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val;
   int en = ent_src->rng_options[GPIO_OPT_EN_PIN].int_val;
   int vnlevel = ent_src->rng_options[GPIO_OPT_VL_PIN].int_val;
+  int i, j, c;
   struct timespec tm;
+  long ccount[2], totalc;
+  double ent, prob;
+  unsigned char buf[64];
 
   wiringPiSetup();
   pinMode(pin, INPUT);
@@ -226,7 +249,63 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   }
   long vlow_time = timer_end(tm);
   message(LOG_DAEMON|LOG_DEBUG, "GPIO rng: %ld ns to discharge", vlow_time);
+
+  /* Try to do some basic entropy estimation of the raw RNG stream to make sure
+     it hasn't failed in some fundamental way. */
+  for (i=0; i<256; i++) {
+    ccount[i] = 0;
+  }
+  totalc = 0;
+  ent = 0.0;
+  /* Repeat self-test raw read SELFTEST_COUNT times, more repetitions
+     give more accurate estimates of GPIO rng entropy */
+  for (j=0; j<SELFTEST_COUNT; j++) {
+    /* Enable */
+    gpio_enable(ent_src);
+    tm = timer_start();
+    while (digitalRead(vnlevel) == 0) {
+      if (timer_end(tm) > VHIGH_TIMEOUT) {
+	message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, voltage level not increasing");
+	return(1);
+      }
+    }
+
+    /* read raw data from GPIO RNG */
+    gpio_bytes(ent_src, buf, sizeof(buf)/sizeof(unsigned char));
+    gpio_disable(ent_src);
+
+    /* Calculate counts of 0/1 bits */
+    for (i=0; i<sizeof(buf)/sizeof(unsigned char); i++) {
+      /* Brian W. Kernighan's Hamming weight / popcount algorithm */
+      for (c=0; buf[i]; c++)
+	buf[i] &= buf[i] - 1;
+      ccount[1] = c;
+      ccount[0] = 8-c;
+      totalc += 8;
+    }
+  }
+  /* Calculate entropy based on bit counts */
+  ent = 0.0;
+  /* If either bin is 0 then entropy is zero, and the RNG is clearly failed */
+  if (ccount[0] <= 0 || ccount[1] <= 0)  {
+    message(LOG_DAEMON|LOG_ERROR, "GPIO rng fails, entropy is zero\n");
+    return(1);
+  }
+
+  /* Calculate probabilities of 0 or 1 */
+  prob = ((double)ccount[0])/((double)totalc);
+  ent += prob * LOG2(1.0/prob);
+  prob = ((double)ccount[1])/((double)totalc);
+  ent += prob * LOG2(1.0/prob);
+  message(LOG_DAEMON|LOG_DEBUG, "GPIO entropy = %g shannon\n", ent);
+
+  if (ent < ENT_THRESHOLD) {
+    message(LOG_DAEMON|LOG_ERROR, "GPIO rng fails, entropy is below threshold\n");
+    return(1);
+  }
+  
   message(LOG_DAEMON|LOG_INFO, "Enabling GPIO rng support\n");
+  return(0);
 }
 
 extern void close_gpiorng_entropy_source(struct rng *ent_src)
