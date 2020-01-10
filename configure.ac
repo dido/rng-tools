@@ -47,13 +47,6 @@ AC_ARG_WITH([pkcs11],
 	[with_pkcs11=check]
 )
 
-AC_ARG_WITH([gpiorng],
-	AS_HELP_STRING([--without-gpiorng],
-		[Disable GPIO RNG support. ]).
-		[],
-		[with_gpiorng=check]
-)
-
 AC_ARG_WITH([libargp],
 	AS_HELP_STRING([--without-libargp],
 		[Disable libargp support. Systems whose libc lacks argp can use libargp instead. (Default: check if libc lacks argp)]),
@@ -81,7 +74,6 @@ AM_CONDITIONAL([DARN], [test $target_cpu = powerpc64le])
 AS_IF([test $target_cpu = powerpc64le], [AC_DEFINE([HAVE_DARN],1,[Enable DARN])],[])
 
 AM_CONDITIONAL([JITTER], [false])
-
 
 AC_ARG_ENABLE(jitterentropy,
 	AS_HELP_STRING([--disable-jitterentropy | --enable-jitterentropy=<path>],
@@ -121,21 +113,29 @@ AS_IF(
 	]
 )
 
+AM_CONDITIONAL([GPIORNG], [false])
+
+AC_ARG_ENABLE(gpiorng,
+	AS_HELP_STRING([--disable-gpiorng | --enable-gpiorng=<path>],
+	[Disable gpiorng source, or specify path to libWiringPi]),
+	[if [ test -d $enable_gpiorng ]; then
+		export LDFLAGS+=-L$enable_gpiorng;
+		export CFLAGS+=" -I$enable_gpiorng";
+	fi],[])
+
 AS_IF(
-	[ test "x$with_gpiorng" != "xno"],
+	[ test "x$enable_gpiorng" != "xno" ],
 	[
-		AC_CHECK_HEADERS(wiringPi.h,, AC_MSG_ERROR([libwiringPi is required for GPIO RNG]))
-		AC_MSG_NOTICE([Searching for wiringPi library])
-		AC_SEARCH_LIBS(wiringPiSetup, wiringPi,
+		AC_MSG_NOTICE([Searching for libwiringPi library])
+		AC_SEARCH_LIBS(wiringPiSetup,wiringPi,
 				[AM_CONDITIONAL([GPIORNG], [true])
-				 AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIO RNG])],
-				AC_MSG_NOTICE([No wiringPi library found))
-	], [AC_MSG_NOTICE([Disabling GPIO entropy source])]
+				AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIORNG])],
+				AC_MSG_NOTICE([No wiringPi libary found]))
+	], [AC_MSG_NOTICE([Disabling GPIORNG entropy source])]
 )
 
 AM_CONDITIONAL([NISTBEACON], [test "x$with_nistbeacon" != "xno"])
 AM_CONDITIONAL([PKCS11], [test "x$with_pkcs11" != "xno"])
-AM_CONDITIONAL([GPIORNG], [test "x$with_gpiorng" != "xno"])
 
 dnl Checks for header files.
 dnl AC_HEADER_STDC
