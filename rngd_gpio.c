@@ -145,7 +145,7 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
   unsigned int rcount=0;
 
   if (!gpio_enable(ent_src))
-    return(-1);
+    return(1);
   while (count--) {
     for (bits=0; bits<8; bits++) {
       *cptr <<= 1;
@@ -175,7 +175,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
   gcry_error_t gcry_error;
  
   if (!gpio_enable(ent_src))
-    return(0);
+    return(1);
   gcry_md_reset(gcry_hash_hd);
   for (i=0; i<HASH_DLEN; i++) {
     unsigned char byte = 0;
@@ -201,12 +201,12 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
     message(LOG_DAEMON|LOG_ERR,
 	    "gcry_cipher_encrypt error: %s\n",
 	    gcry_strerror(gcry_error));
-    return(0);
+    return(1);
   }
   /* Copy encrypted result to output buffer */
   memcpy(buf, hb+AES_BLOCK, AES_BLOCK);
   gcry_md_reset(gcry_hash_hd);
-  return(1);
+  return(0);
 }
 
 /* Using gcrypt to whiten the output of the GPIO */
@@ -215,8 +215,8 @@ static int gpio_gbytes(struct rng *ent_src, void *out, size_t count)
   unsigned char buf[AES_BLOCK], *ptr = out;
   do {
     /* Obtain 16 whitened bytes from the GPIOrng */
-    if (!gpio_readblock(ent_src, buf))
-      return(0);
+    if (gpio_readblock(ent_src, buf))
+      return(1);
     /* Copy block to destination buffer */
     if (count >= AES_BLOCK) {
       memcpy(ptr, buf, AES_BLOCK);
@@ -227,7 +227,7 @@ static int gpio_gbytes(struct rng *ent_src, void *out, size_t count)
       count = 0;
     }
   } while (count > 0);
-  return(1);
+  return(0);
 }
 
 #endif
