@@ -90,17 +90,13 @@ static long timer_end(struct timespec start_time)
   return(diffInNanos);
 }
 
-/* Enable the GPIO random number generator */
-static void gpio_enable_raw(struct rng *ent_src)
-{
-  digitalWrite(ent_src->rng_options[GPIO_OPT_EN_PIN].int_val, 1);
-}
-
+/* Enable GPIO random number generator, and wait for it to become active
+   by monitoring VL pin */
 static int gpio_enable(struct rng *ent_src)
 {
   struct timespec tm;
 
-  gpio_enable_raw(ent_src);
+  digitalWrite(ent_src->rng_options[GPIO_OPT_EN_PIN].int_val, 1);
   tm = timer_start();
   while (digitalRead(ent_src->rng_options[GPIO_OPT_VL_PIN].int_val) == 0) {
     if (timer_end(tm) > VHIGH_TIMEOUT) {
@@ -111,7 +107,7 @@ static int gpio_enable(struct rng *ent_src)
   return(1);
 }
 
-/* Disable the GPIO random number generator */
+/* Disable the GPIO random number generator by shutting down enable pin */
 static void gpio_disable(struct rng *ent_src)
 {
   digitalWrite(ent_src->rng_options[GPIO_OPT_EN_PIN].int_val, 0);
@@ -315,14 +311,8 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
      Try to enable the RNG, and check to see if the voltage
      level pin goes up promptly to at least 18Vdc (1) when it is
      enabled. */
-  gpio_enable_raw(ent_src);
-  tm = timer_start();
-  while (digitalRead(vnlevel) == 0) {
-    if (timer_end(tm) > VHIGH_TIMEOUT) {
-      message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, voltage level not increasing");
-      return(1);
-    }
-  }
+  if (!gpio_enable(ent_src))
+    return(1);
 
   /* Try to disable the RNG, and then see how long it will take for the
      voltage level pin to drop to 0 (below 12Vdc). */
@@ -348,15 +338,9 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
      give more accurate estimates of GPIO rng entropy */
   for (j=0; j<SELFTEST_COUNT; j++) {
     /* Enable */
-    gpio_enable_raw(ent_src);
-    tm = timer_start();
-    while (digitalRead(vnlevel) == 0) {
-      if (timer_end(tm) > VHIGH_TIMEOUT) {
-	message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, voltage level not increasing");
-	return(1);
-      }
+    if (!gpio_enable(ent_src)) {
+      return(1);
     }
-
     /* read raw data from GPIO RNG */
     gpio_bytes(ent_src, buf, sizeof(buf)/sizeof(unsigned char));
     gpio_disable(ent_src);
