@@ -1,3 +1,9 @@
+2020-01-10  Rafael Sevilla  <dido.sevilla@gmail.com>
+
+	*  rngd.h, rngd.c, rngd_gpio.c, rngd.8.in: support for
+	   GPIO-based random bit generators such as the Tiamat
+	   RNG hat.
+
 Tue May 09 2004  Henrique de Moraes Holschuh <hmh@debian.org>
 
 	* rngd.h, rngd.c, rngd_linux.c, rngd.8.in: Let the user
