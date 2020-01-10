@@ -152,9 +152,9 @@ static enum {
 	ENT_NISTBEACON,
 	ENT_JITTER,
 	ENT_PKCS11,
+	ENT_GPIO,
 	ENT_MAX
 } entropy_indexes __attribute__((used));
-
 
 static struct rng_option drng_options[] = {
 	[DRNG_OPT_AES] = {
@@ -214,6 +214,32 @@ static struct rng_option jitter_options[] = {
 	}
 };
 
+static struct rng_option gpio_options[] = {
+  [GPIO_OPT_AES] = {
+    .key = "use_aes",
+    .type = VAL_INT,
+    .int_val = 1,
+  },
+  [GPIO_OPT_DATA_PIN] = {
+    .key = "data_pin",
+    .type = VAL_INT,
+    .int_val = 16,
+  },
+  [GPIO_OPT_EN_PIN] = {
+    .key = "enable_pin",
+    .type = VAL_INT,
+    .int_val = 7,
+  },
+  [GPIO_OPT_VL_PIN] = {
+    .key = "vhighsample_pin",
+    .type = VAL_INT,
+    .int_val = 1,
+  },
+  {
+    .key = NULL,
+  }
+};
+
 #ifndef DEFAULT_PKCS11_ENGINE
 #define DEFAULT_PKCS11_ENGINE "/usr/lib64/opensc-pkcs11.so"
 #endif
@@ -232,6 +258,32 @@ static struct rng_option pkcs11_options[] = {
 	{
 		.key = NULL,
 	}
+};
+
+static struct rng_option gpio_options[] = {
+  [GPIO_OPT_AES] = {
+    .key = "use_aes",
+    .type = VAL_INT,
+    .int_val = 1,
+  },
+  [GPIO_OPT_DATA_PIN] = {
+    .key = "data_pin",
+    .type = VAL_INT,
+    .int_val = 16,
+  },
+  [GPIO_OPT_EN_PIN] = {
+    .key = "enable_pin",
+    .type = VAL_INT,
+    .int_val = 7,
+  },
+  [GPIO_OPT_VL_PIN] = {
+    .key = "vhighsample_pin",
+    .type = VAL_INT,
+    .int_val = 1,
+  },
+  {
+    .key = NULL,
+  }
 };
 
 static struct rng entropy_sources[ENT_MAX] = {
@@ -329,6 +381,17 @@ static struct rng entropy_sources[ENT_MAX] = {
 		.disabled	= true,
 #endif
 		.rng_options	= pkcs11_options,
+	},
+	{
+	  .rng_name = "GPIO Random bit generator",
+	  .rng_sname = "gpio",
+	  .rng_fd = -1,
+	  .flags = { 0 },
+	  .xread = xread_gpiorng,
+	  .init = init_gpiorng_entropy_source,
+	  .close = close_gpiorng_entropy_source,
+	  .rng_options = gpio_options,
+	  .disabled = true,
 	},
 };
 
