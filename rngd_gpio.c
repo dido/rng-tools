@@ -257,7 +257,7 @@ static int init_gcrypt(void)
 	    "could not initialise gcrypt: %s\n",
 	    gcry_strerror(gcry_error));
     gcry_cipher_close(gcry_cipher_hd);
-    gcry_md_close(gcry_hash_hd;
+    gcry_md_close(gcry_hash_hd);
     return(1);
   }
   return(0);
@@ -328,10 +328,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
 
   /* Try to do some basic entropy estimation of the raw RNG stream to make sure
      it hasn't failed in some fundamental way. */
-  for (i=0; i<256; i++) {
-    ccount[i] = 0;
-  }
-  totalc = 0;
+  ccount[0] = ccount[1] = totalc = 0;
   ent = 0.0;
   /* Repeat self-test raw read SELFTEST_COUNT times, more repetitions
      give more accurate estimates of GPIO rng entropy */
