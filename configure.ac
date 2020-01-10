@@ -51,7 +51,7 @@ AC_ARG_WITH([gpiorng],
 	AS_HELP_STRING([--without-gpiorng],
 		[Disable GPIO RNG support. ]).
 		[],
-		[with_gpiorng=no]
+		[with_gpiorng=check]
 )
 
 AC_ARG_WITH([libargp],
