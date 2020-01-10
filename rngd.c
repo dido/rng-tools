@@ -214,32 +214,6 @@ static struct rng_option jitter_options[] = {
 	}
 };
 
-static struct rng_option gpio_options[] = {
-  [GPIO_OPT_AES] = {
-    .key = "use_aes",
-    .type = VAL_INT,
-    .int_val = 1,
-  },
-  [GPIO_OPT_DATA_PIN] = {
-    .key = "data_pin",
-    .type = VAL_INT,
-    .int_val = 16,
-  },
-  [GPIO_OPT_EN_PIN] = {
-    .key = "enable_pin",
-    .type = VAL_INT,
-    .int_val = 7,
-  },
-  [GPIO_OPT_VL_PIN] = {
-    .key = "vhighsample_pin",
-    .type = VAL_INT,
-    .int_val = 1,
-  },
-  {
-    .key = NULL,
-  }
-};
-
 #ifndef DEFAULT_PKCS11_ENGINE
 #define DEFAULT_PKCS11_ENGINE "/usr/lib64/opensc-pkcs11.so"
 #endif
