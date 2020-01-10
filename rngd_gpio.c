@@ -346,8 +346,8 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
       /* Brian W. Kernighan's Hamming weight / popcount algorithm */
       for (c=0; buf[i]; c++)
 	buf[i] &= buf[i] - 1;
-      ccount[1] = c;
-      ccount[0] = 8-c;
+      ccount[1] += c;
+      ccount[0] += 8-c;
       totalc += 8;
     }
   }
