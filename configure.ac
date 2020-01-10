@@ -125,13 +125,12 @@ AS_IF(
 	[ test "x$with_gpiorng" != "xno"],
 	[
 		AC_CHECK_HEADERS(wiringPi.h,, AC_MSG_ERROR([libwiringPi is required for GPIO RNG]))
-		AC_CHECK_LIB(wiringPi, wiringPiSetup, WIRINGPI_LIBS=-lwiringPi)
-		if test "$WIRINGPI_LIBS" != ""; then
-		   AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIO RNG])
-		else
-		   AC_MSG_ERROR([libwiringPi is required for GPIO RNG])
-		fi
-	]
+		AC_MSG_NOTICE([Searching for wiringPi library])
+		AC_SEARCH_LIBS(wiringPiSetup, wiringPi,
+				[AM_CONDITIONAL([GPIORNG], [true])
+				 AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIO RNG])],
+				AC_MSG_NOTICE([No wiringPi library found))
+	], [AC_MSG_NOTICE([Disabling GPIO entropy source])]
 )
 
 AM_CONDITIONAL([NISTBEACON], [test "x$with_nistbeacon" != "xno"])
