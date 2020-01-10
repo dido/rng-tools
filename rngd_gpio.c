@@ -30,6 +30,9 @@
 #include <wiringPi.h>
 #include <time.h>
 #include <math.h>
+#ifdef HAVE_LIBGCRYPT
+#include <gcrypt.h>
+#endif
  
 /* Default RNG data pin */
 #define GPIO_DATA_PIN 16
