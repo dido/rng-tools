@@ -370,7 +370,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   message(LOG_DAEMON|LOG_DEBUG, "GPIO entropy = %g shannon\n", ent);
 
   if (ent < ENT_THRESHOLD) {
-    message(LOG_DAEMON|LOG_ERROR, "GPIO rng fails, entropy is below threshold\n");
+    message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, entropy is below threshold\n");
     return(1);
   }
 
