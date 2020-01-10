@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020, Rafael R. Sevilla
+ * Copyright (c) 2020 Rafael R. Sevilla
  * Authors: Rafael R. Sevilla <dido.sevilla@stormwyrm.com>,
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -30,9 +30,10 @@
 #include <wiringPi.h>
 #include <time.h>
 #include <math.h>
-
+ 
 /* Default RNG data pin */
 #define GPIO_DATA_PIN 16
+
 /* Default RNG enable pin */
 #define GPIO_EN_PIN 7
 /* Default RNG VHIGHSAMPLE pin */
@@ -65,17 +66,49 @@
 #define MIN_GCRYPT_VERSION "1.0.0"
 
 #define GCRY_HASH_ALG GCRY_MD_SHA256
-#define HASH_DLEN 64
+/* Get 768 bytes of raw data to hash */
+#define HASH_DLEN 96
+#define AES_BLOCK 16
 
 static gcry_cipher_hd_t gcry_cipher_hd;
 static gcry_md_hd_t gcry_hash_hd;
 
 #endif
 
+static struct timespec timer_start()
+{
+  struct timespec start_time;
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start_time);
+  return(start_time);
+}
+
+static long timer_end(struct timespec start_time)
+{
+  struct timespec end_time;
+  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end_time);
+  long diffInNanos = (end_time.tv_sec - start_time.tv_sec) * 1000000000L + (end_time.tv_nsec - start_time.tv_nsec);
+  return(diffInNanos);
+}
+
 /* Enable the GPIO random number generator */
-static void gpio_enable(struct rng *ent_src)
+static void gpio_enable_raw(struct rng *ent_src)
 {
   digitalWrite(ent_src->rng_options[GPIO_OPT_EN_PIN].int_val, 1);
+}
+
+static int gpio_enable(struct rng *ent_src)
+{
+  struct timespec tm;
+
+  gpio_enable_raw(ent_src);
+  tm = timer_start();
+  while (digitalRead(ent_src->rng_options[GPIO_OPT_VL_PIN].int_val) == 0) {
+    if (timer_end(tm) > VHIGH_TIMEOUT) {
+      message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, voltage level not increasing");
+      return(0);
+    }
+  }
+  return(1);
 }
 
 /* Disable the GPIO random number generator */
@@ -85,10 +118,10 @@ static void gpio_disable(struct rng *ent_src)
 }
 
 /*
- * Get data from GPIO. This is raw, unfiltered data.
+ * Get data from GPIO. This is raw, unfiltered data, useful only for
+ * diagnostics.
  */
-static unsigned int gpio_bytes(struct rng *ent_src, void *ptr,
-			       unsigned int count)
+static int gpio_bytes(struct rng *ent_src, void *ptr, size_t count)
 {
   unsigned char *cptr = (unsigned char *)ptr;
   int bits;
@@ -110,13 +143,14 @@ static unsigned int gpio_bytes(struct rng *ent_src, void *ptr,
 
 /* Von Neumann whitening. Used when AES/libgcrypt is disabled. We might want
    to consider other algorithms to do this in the future. */
-static unsigned int gpio_vnbytes(struct rng *ent_src, void *ptr,
-			       unsigned int count)
+static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 {
   unsigned char *cptr = (unsigned char *)ptr;
   int bits, bit1, bit2;
   unsigned int rcount=0;
 
+  if (!gpio_enable(ent_src))
+    return(-1);
   while (count--) {
     for (bits=0; bits<8; bits++) {
       *cptr <<= 1;
@@ -132,8 +166,77 @@ static unsigned int gpio_vnbytes(struct rng *ent_src, void *ptr,
     cptr++;
     rcount++;
   }
-  return(rcount);
+  gpio_disable(ent_src);
+  return(0);
 }
+
+#ifdef HAVE_LIBGCRYPT
+
+/* Read a 16-byte block of random data, whitened with SHA256+AES */
+static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
+{
+  int i, bits;
+  unsigned char *hb;
+  gcry_error_t gcry_error;
+ 
+  if (!gpio_enable(ent_src))
+    return(0);
+  gcry_md_reset(gcry_hash_hd);
+  for (i=0; i<HASH_DLEN; i++) {
+    unsigned char byte = 0;
+    for (bits=0; bits<8; bits++) {
+      byte <<= 1;
+      if (digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val))
+	byte |= 0x01;
+      else
+	byte &= 0xfe;
+    }
+    gcry_md_putc(gcry_hash_hd, byte);
+  }
+  gpio_disable(ent_src);
+  hb = gcry_md_read(gcry_hash_hd, GCRY_HASH_ALG);
+  /* Set key to the first 128 bits of hb */
+  gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hb, AES_BLOCK);
+  /* Encrypt the second half of hb with the first half as key */
+  if (!gcry_error) {
+    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, hb + AES_BLOCK,
+				     AES_BLOCK, NULL, 0);
+  }
+  if (gcry_error) {
+    message(LOG_DAEMON|LOG_ERR,
+	    "gcry_cipher_encrypt error: %s\n",
+	    gcry_strerror(gcry_error));
+    return(0);
+  }
+  /* Copy encrypted result to output buffer */
+  memcpy(buf, hb+AES_BLOCK, AES_BLOCK);
+  gcry_md_reset(gcry_hash_hd);
+  return(1);
+}
+
+/* Using gcrypt to whiten the output of the GPIO */
+static int gpio_gbytes(struct rng *ent_src, void *out, size_t count)
+{
+  unsigned char buf[AES_BLOCK], *ptr = out;
+  do {
+    /* Obtain 16 whitened bytes from the GPIOrng */
+    if (!gpio_readblock(ent_src, buf))
+      return(0);
+    /* Copy block to destination buffer */
+    if (count >= AES_BLOCK) {
+      memcpy(ptr, buf, AES_BLOCK);
+      ptr += AES_BLOCK;
+      count -= AES_BLOCK;
+    } else {
+      memcpy(ptr, buf, count);
+      count = 0;
+    }
+  } while (count > 0);
+  return(1);
+}
+
+#endif
+
 
 static int init_gcrypt(void)
 {
@@ -147,11 +250,11 @@ static int init_gcrypt(void)
     return(1);
   }
 
-  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_HASH_ALG, GCRY_MD_FLAG_SECURE);
+  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_HASH_ALG, 0);
 
   if (!gcry_error) {
     gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
-				  GCRY_CIPHER_MODE_CBC, 0);
+				  GCRY_CIPHER_MODE_ECB, 0);
   }
 
   if (gcry_error) {
@@ -168,7 +271,6 @@ static int init_gcrypt(void)
   return(1);
 #endif
 }
-
 
 int validate_gpio_options(struct rng *ent_src)
 {
@@ -193,21 +295,6 @@ int validate_gpio_options(struct rng *ent_src)
   return(0);
 }
 
-static struct timespec timer_start()
-{
-  struct timespec start_time;
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &start_time);
-  return(start_time);
-}
-
-static long timer_end(struct timespec start_time)
-{
-  struct timespec end_time;
-  clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &end_time);
-  long diffInNanos = (end_time.tv_sec - start_time.tv_sec) * 1000000000L + (end_time.tv_nsec - start_time.tv_nsec);
-  return(diffInNanos);
-}
-
 int init_gpiorng_entropy_source(struct rng *ent_src)
 {
   int pin = ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val;
@@ -228,7 +315,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
      Try to enable the RNG, and check to see if the voltage
      level pin goes up promptly to at least 18Vdc (1) when it is
      enabled. */
-  gpio_enable(ent_src);
+  gpio_enable_raw(ent_src);
   tm = timer_start();
   while (digitalRead(vnlevel) == 0) {
     if (timer_end(tm) > VHIGH_TIMEOUT) {
@@ -261,7 +348,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
      give more accurate estimates of GPIO rng entropy */
   for (j=0; j<SELFTEST_COUNT; j++) {
     /* Enable */
-    gpio_enable(ent_src);
+    gpio_enable_raw(ent_src);
     tm = timer_start();
     while (digitalRead(vnlevel) == 0) {
       if (timer_end(tm) > VHIGH_TIMEOUT) {
@@ -303,7 +390,12 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
     message(LOG_DAEMON|LOG_ERROR, "GPIO rng fails, entropy is below threshold\n");
     return(1);
   }
-  
+
+  if (ent_src->rng_options[GPIO_OPT_AES].int_val && init_gcrypt()) {
+    ent_src->rng_options[GPIO_OPT_AES].int_val = 0;
+    message(LOG_DAEMON|LOG_WARNING, "No AES whitening method available for GPIO\n");
+  }
+
   message(LOG_DAEMON|LOG_INFO, "Enabling GPIO rng support\n");
   return(0);
 }
@@ -315,4 +407,13 @@ extern void close_gpiorng_entropy_source(struct rng *ent_src)
 
 int xread_gpiorng(void *buf, size_t size, struct rng *ent_src)
 {
+  /* If AES is disabled or not present, use von Neumann whitening */
+  if (!ent_src->rng_options[GPIO_OPT_AES].int_val) {    
+    return(gpio_vnbytes(ent_src, buf, size));
+  }
+#ifdef HAVE_LIBGCRYPT
+  return(gpio_gbytes(ent_src, buf, size));
+#else
+  return(gpio_vnbytes(ent_src, buf, size));
+#endif
 }
