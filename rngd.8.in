@@ -190,6 +190,20 @@ Options
 be requested at a time, this option allows for the request to be subdivided into
 smaller chunks to be satisfied
 
+.TP
+.B
+GPIO (gpio) [Index 7]
+Entropy gathered via a random bit generator circuit attached to GPIO pins, e.g. the Tiamat RNG hat for the Orange Pi Zero.
+.TP
+Options
+\fBuse_aes - \fR Perform bit generator whitening using SHA256/AES. If disabled whitening will be performed using von Neumann algorithm.
+
+\fBdata_pin - \fR Number of the GPIO pin used for receiving random data. Defaults to pin 16.
+
+\fBenable_pin - \fR Number of the GPIO pin used to enable the RNG. Defaults to pin 7. The boost converter employed by most such RNG designs, including Tiamat, may cause interference so it is enabled only when required.
+
+\fBvhighsample_pin - \fR Number of the GPIO pin used to sample the voltage boost circuit of the RNG. This is typically a voltage divider circuit connected to the boost converter that should provide a logic 1 when the boost converter has reached operating level, and 0, when it drops below.
+
 .SH AUTHORS
 Philipp Rumpf
 .br
@@ -199,4 +213,6 @@ Matt Sottek
 .br
 Brad Hill
 .br
-Neil Horman - nhorman@tuxdriver.com
+Neil Horman \- nhorman@tuxdriver.com
+.br
+Rafael Sevilla \- dido.sevilla@stormwyrm.com
