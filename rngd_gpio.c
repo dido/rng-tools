@@ -57,10 +57,6 @@
    circuit failed. */
 #define ENT_THRESHOLD 0.8
 
-#define log2of10 3.32192809488736234787
-
-#define LOG2(x) (log2of10 * log10(x))
-
 #ifdef HAVE_LIBGCRYPT
 
 #define MIN_GCRYPT_VERSION "1.0.0"
@@ -365,9 +361,9 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
 
   /* Calculate probabilities of 0 or 1 */
   prob = ((double)ccount[0])/((double)totalc);
-  ent += prob * LOG2(1.0/prob);
+  ent += prob * log2(1.0/prob);
   prob = ((double)ccount[1])/((double)totalc);
-  ent += prob * LOG2(1.0/prob);
+  ent += prob * log2(1.0/prob);
   message(LOG_DAEMON|LOG_DEBUG, "GPIO entropy = %g shannon\n", ent);
 
   if (ent < ENT_THRESHOLD) {
