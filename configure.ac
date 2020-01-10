@@ -130,7 +130,8 @@ AS_IF(
 		AC_SEARCH_LIBS(wiringPiSetup,wiringPi,
 				[AM_CONDITIONAL([GPIORNG], [true])
 				AC_DEFINE([HAVE_GPIORNG],1,[Enable GPIORNG])],
-				AC_MSG_NOTICE([No wiringPi libary found]))
+				AC_MSG_NOTICE([No wiringPi libar found]))
+		AC_SEARCH_LIBS([log2],[m])
 	], [AC_MSG_NOTICE([Disabling GPIORNG entropy source])]
 )
 
