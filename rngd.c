@@ -387,11 +387,14 @@ static struct rng entropy_sources[ENT_MAX] = {
 	  .rng_sname = "gpio",
 	  .rng_fd = -1,
 	  .flags = { 0 },
+#ifdef HAVE_GPIORNG
 	  .xread = xread_gpiorng,
 	  .init = init_gpiorng_entropy_source,
 	  .close = close_gpiorng_entropy_source,
-	  .rng_options = gpio_options,
+#else
 	  .disabled = true,
+#endif
+	  .rng_options = gpio_options,
 	},
 };
 
