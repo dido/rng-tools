@@ -257,7 +257,7 @@ static int init_gcrypt(void)
 	    "could not initialise gcrypt: %s\n",
 	    gcry_strerror(gcry_error));
     gcry_cipher_close(gcry_cipher_hd);
-    gcry_md_close(gcry_md_hd);
+    gcry_md_close(gcry_hash_hd;
     return(1);
   }
   return(0);
@@ -358,7 +358,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   ent = 0.0;
   /* If either bin is 0 then entropy is zero, and the RNG is clearly failed */
   if (ccount[0] <= 0 || ccount[1] <= 0)  {
-    message(LOG_DAEMON|LOG_ERROR, "GPIO rng fails, entropy is zero\n");
+    message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, entropy is zero\n");
     return(1);
   }
 
