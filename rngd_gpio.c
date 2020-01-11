@@ -168,7 +168,7 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 #ifdef HAVE_LIBGCRYPT
 
 /* Read a 16-byte block of random data, whitened with SHA256+AES */
-static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
+static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 {
   int i, bits;
   gcry_error_t gcry_error;
@@ -205,7 +205,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
     return(1);
   }
   /* Copy encrypted result to output buffer */
-  memcpy(buf, buf+AES_BLOCK, AES_BLOCK);
+  memcpy(obuf, buf+AES_BLOCK, AES_BLOCK);
   gcry_md_reset(gcry_hash_hd);
   return(0);
 }
