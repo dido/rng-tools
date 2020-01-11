@@ -171,8 +171,8 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
 {
   int i, bits;
-  unsigned char *hb;
   gcry_error_t gcry_error;
+  unsigned char buf[AES_BLOCK*2];
  
   if (!gpio_enable(ent_src))
     return(1);
@@ -189,12 +189,13 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
     gcry_md_putc(gcry_hash_hd, byte);
   }
   gpio_disable(ent_src);
-  hb = gcry_md_read(gcry_hash_hd, GCRY_HASH_ALG);
-  /* Set key to the first 128 bits of hb */
-  gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hb, AES_BLOCK);
-  /* Encrypt the second half of hb with the first half as key */
+  gcry_error = gcry_md_extract(gcry_hash_hd, GCRY_HASH_ALG, buf, AES_BLOCK*2);
+  /* Set key to the first 128 bits of buf */
+  if (!gcry_error)
+    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, buf, AES_BLOCK);
+  /* Encrypt the second half of buf with the first half as key */
   if (!gcry_error) {
-    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, hb + AES_BLOCK,
+    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, buf + AES_BLOCK,
 				     AES_BLOCK, NULL, 0);
   }
   if (gcry_error) {
@@ -204,7 +205,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *buf)
     return(1);
   }
   /* Copy encrypted result to output buffer */
-  memcpy(buf, hb+AES_BLOCK, AES_BLOCK);
+  memcpy(buf, buf+AES_BLOCK, AES_BLOCK);
   gcry_md_reset(gcry_hash_hd);
   return(0);
 }
