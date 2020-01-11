@@ -64,7 +64,6 @@
 
 #define MIN_GCRYPT_VERSION "1.0.0"
 
-#define GCRY_HASH_ALG GCRY_MD_SHA256
 /* Get 768 bytes of raw data to hash */
 #define HASH_DLEN 96
 #define AES_BLOCK 16
@@ -172,7 +171,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 {
   int i, bits;
   gcry_error_t gcry_error;
-  unsigned char buf[AES_BLOCK*2];
+  unsigned char *hbuf;
  
   if (!gpio_enable(ent_src))
     return(1);
@@ -189,13 +188,14 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
     gcry_md_putc(gcry_hash_hd, byte);
   }
   gpio_disable(ent_src);
-  gcry_error = gcry_md_extract(gcry_hash_hd, GCRY_HASH_ALG, buf, AES_BLOCK*2);
-  /* Set key to the first 128 bits of buf */
+  gcry_error = gcry_md_final(gcry_hash_hd);
+  hbuf = gcry_md_read(gcry_hash_hd, GCRY_MD_SHA256);
+  /* Set key to the first 128 bits of hbuf */
   if (!gcry_error)
-    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, buf, AES_BLOCK);
+    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hbuf, AES_BLOCK);
   /* Encrypt the second half of buf with the first half as key */
   if (!gcry_error) {
-    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, buf + AES_BLOCK,
+    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, hbuf + AES_BLOCK,
 				     AES_BLOCK, NULL, 0);
   }
   if (gcry_error) {
@@ -205,7 +205,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
     return(1);
   }
   /* Copy encrypted result to output buffer */
-  memcpy(obuf, buf+AES_BLOCK, AES_BLOCK);
+  memcpy(obuf, hbuf+AES_BLOCK, AES_BLOCK);
   gcry_md_reset(gcry_hash_hd);
   return(0);
 }
@@ -246,7 +246,7 @@ static int init_gcrypt(void)
     return(1);
   }
 
-  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_HASH_ALG, 0);
+  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_MD_SHA256, 0);
 
   if (!gcry_error) {
     gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
