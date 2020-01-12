@@ -64,12 +64,12 @@
 
 #define MIN_GCRYPT_VERSION "1.0.0"
 
-/* Get 1024 bytes of raw data to hash */
-#define HASH_DLEN 1024
 #define AES_BLOCK 16
+#define CHUNK_SIZE (AES_BLOCK*8)
+#define RDRAND_ROUNDS 512
 
+static unsigned char iv_buf[CHUNK_SIZE] __attribute__((aligned(128)));
 static gcry_cipher_hd_t gcry_cipher_hd;
-static gcry_md_hd_t gcry_hash_hd;
 
 #endif
 
@@ -118,7 +118,7 @@ static double ent, prob;
 static int gpio_bit(struct rng *ent_src)
 {
   int bit = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
-  if (totalc >= 1048576) {
+  if (totalc >= HASH_DLEN * 1024) {
     ent = 0.0;
     if (ccount[0] > 0 && ccount[1] > 0) {
       prob = ((double)ccount[0])/((double)totalc);
@@ -135,10 +135,9 @@ static int gpio_bit(struct rng *ent_src)
 }
 
 /*
- * Get data from GPIO. This is raw, unfiltered data, useful only for
- * diagnostics.
+ * Get data from GPIO
  */
-static int gpio_bytes(struct rng *ent_src, void *ptr, size_t count)
+static int gpio_bytes_raw(struct rng *ent_src, void *ptr, size_t count)
 {
   unsigned char *cptr = (unsigned char *)ptr;
   int bits;
@@ -194,76 +193,99 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 
 #ifdef HAVE_LIBGCRYPT
 
-/* Read a 16-byte block of random data, whitened with SHA3-256+AES */
-static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
+static unsigned int gpio_bytes(struct rng *ent_src, void *ptr, size_t count)
 {
-  int i, bits;
-  gcry_error_t gcry_error;
-  unsigned char *hbuf, byte = 0;
- 
-  if (!gpio_enable(ent_src))
-    return(1);
-  for (i=0; i<HASH_DLEN; i++) {
+  unsigned char *cptr = (unsigned char *)ptr;
+  int bits;
+  unsigned int rcount=0;
+
+  while (count--) {
     for (bits=0; bits<8; bits++) {
-      byte <<= 1;
-      if (gpio_bit(ent_src) == 0)
-	byte &= 0xfe;
+      *cptr <<= 1;
+      if (gpio_bit(ent_src));
+	*cptr |= 0x01;
       else
-	byte |= 0x01;
+	*cptr &= 0xfe;
     }
-    gcry_md_putc(gcry_hash_hd, byte);
+    cptr++;
+    rcount++;
   }
-  gpio_disable(ent_src);
-  gcry_error = gcry_md_final(gcry_hash_hd);
-  hbuf = gcry_md_read(gcry_hash_hd, GCRY_MD_SHA3_256);
-  /* Set key to the first 128 bits of hbuf */
-  if (!gcry_error)
-    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hbuf, AES_BLOCK);
-  /* Encrypt the second half of buf with the first half as key,
-     send ciphertext to obuf */
-  if (!gcry_error) {
-    gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, hbuf + AES_BLOCK,
-				     AES_BLOCK, obuf, AES_BLOCK);
-  }
+  return(rcount);
+}
+
+static inline int gcrypt_mangle(unsigned char *tmp)
+{
+#ifdef HAVE_LIBGCRYPT
+  gcry_error_t gcry_error;
+
+  /* Encrypt tmp in-place. */
+  gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, tmp,
+				   AES_BLOCK * RDRAND_ROUNDS,
+				   NULL, 0);
+
   if (gcry_error) {
     message(LOG_DAEMON|LOG_ERR,
 	    "gcry_cipher_encrypt error: %s\n",
 	    gcry_strerror(gcry_error));
-    return(1);
+    return -1;
   }
-  gcry_md_reset(gcry_hash_hd);
-  return(0);
+  return 0;
+#else
+  (void)tmp;
+  return -1;
+#endif
 }
 
-/* Using gcrypt to whiten the output of the GPIO */
-static int gpio_gbytes(struct rng *ent_src, void *out, size_t count)
+/* Use gcrypt to whiten the output of the GPIO */
+static int gpio_gbytes(struct rng *ent_src, void *buf, size_t size)
 {
-  unsigned char buf[AES_BLOCK], *ptr = out;
+  static unsigned char rdrand_buf[CHUNK_SIZE*RDRAND_ROUNDS];
+  static unsigned int rdrand_bytes = 0;
+  char *p = buf;
+  size_t chunk;
+  unsigned char *rdrand_ptr, *data;
+  unsigned int rand_bytes;
 
-  do {
-    /* Obtain 16 whitened bytes from the GPIOrng */
-    if (gpio_readblock(ent_src, buf))
-      return(1);
-    /* Copy block to destination buffer */
-    if (count >= AES_BLOCK) {
-      memcpy(ptr, buf, AES_BLOCK);
-      ptr += AES_BLOCK;
-      count -= AES_BLOCK;
-    } else {
-      memcpy(ptr, buf, count);
-      count = 0;
+  if (gpio_enable(ent))
+    return(1);
+  while (size) {
+    rand_bytes = AES_BLOCK * RDRAND_ROUNDS - rdrand_bytes;
+    if (rand_bytes) {
+      rdrand_ptr = rdrand_buf + rdrand_bytes;
+      rand_bytes = gpio_bytes(ent_src, rdrand_ptr, rand_bytes);
+      rdrand_bytes += rand_bytes;
+      continue;
     }
-  } while (count > 0);
+    /* full rdrand_buf */
+    if (!gcrypt_mangle(rdrand_buf)) {
+      data = rdrand_buf + AES_BLOCK * (RDRAND_ROUNDS - 1);
+      chunk = AES_BLOCK;
+    } else {
+      return(1);
+    }
+    rdrand_bytes = 0;
+    chunk = (chunk > size) ? size : chunk;
+    memcpy(p, data, chunk);
+    p += chunk;
+    size -= chunk;
+  }
+  gpio_disable(ent);
   return(0);
 }
 
 #endif
 
 
-static int init_gcrypt(void)
+static int init_gcrypt(struct rng *ent_src)
 {
 #ifdef HAVE_LIBGCRYPT
   gcry_error_t gcry_error;
+  unsigned char xkey[AES_BLOCK];	/* Material to XOR into the key */
+  /* AES data reduction key */
+  static unsigned char key[AES_BLOCK] =
+    { 0x00,0x10,0x20,0x30,0x40,0x50,0x60,0x70,
+      0x80,0x90,0xa0,0xb0,0xc0,0xd0,0xe0,0xf0 };
+  int fd, i;
 
   if (!gcry_check_version(MIN_GCRYPT_VERSION)) {
     message(LOG_DAEMON|LOG_ERR,
@@ -272,13 +294,30 @@ static int init_gcrypt(void)
     return(1);
   }
 
-  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_MD_SHA3_256, 0);
+  if (gpio_bytes(ent_src, xkey, sizeof(xkey)) != sizeof(xkey))
+    return(1);
 
-  if (!gcry_error) {
-    gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
-				  GCRY_CIPHER_MODE_ECB, 0);
+  fd = open("/dev/urandom", O_RDONLY);
+  if (fd >= 0) {
+    read(fd, key, sizeof key);
+    close(fd);
   }
 
+  if (gpio_bytes(ent_src, iv_buf, CHUNK_SIZE) != CHUNK_SIZE)
+    return(1);
+
+  for (i=0; i<(int)sizeof(key); i++)
+    key[i] ^= xkey[i];
+
+  gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
+				GCRY_CIPHER_MODE_CBC, 0);
+
+  if (!gcry_error)
+    gcry_error = gcry_cipher_setkey(gcry_cipher_hd, key, AES_BLOCK);
+
+  if (!gcry_error)
+    gcry_error = gcry_cipher_setiv(gcry_cipher_hd, iv_buf, AES_BLOCK);
+  
   if (gcry_error) {
     message(LOG_DAEMON|LOG_ERR,
 	    "could not initialise gcrypt: %s\n",
@@ -289,7 +328,7 @@ static int init_gcrypt(void)
   }
   return(0);
 #else
-  (void)key;
+  (void)ent_src;
   return(1);
 #endif
 }
@@ -397,7 +436,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   }
   ccount[0] = ccount[1] = totalc = 0;
 
-  if (ent_src->rng_options[GPIO_OPT_AES].int_val && init_gcrypt()) {
+  if (ent_src->rng_options[GPIO_OPT_AES].int_val && init_gcrypt(ent_src)) {
     ent_src->rng_options[GPIO_OPT_AES].int_val = 0;
     message(LOG_DAEMON|LOG_WARNING, "No AES whitening method available for GPIO\n");
   }
