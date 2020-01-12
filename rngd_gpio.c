@@ -111,6 +111,29 @@ static void gpio_disable(struct rng *ent_src)
   digitalWrite(ent_src->rng_options[GPIO_OPT_EN_PIN].int_val, 0);
 }
 
+static long ccount[2], totalc;
+static double ent, prob;
+
+/* Read a bit from the GPIO pin */
+static int gpio_bit(struct rng *ent_src)
+{
+  int bit = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
+  if (totalc >= 4096) {
+    ent = 0.0;
+    if (ccount[0] > 0 && ccount[1] > 0) {
+      prob = ((double)ccount[0])/((double)totalc);
+      ent += prob * log2(1.0/prob);
+      prob = ((double)ccount[1])/((double)totalc);
+      ent += prob * log2(1.0/prob);
+    }
+    message(LOG_DAEMON|LOG_DEBUG, "GPIO entropy = %g shannon\n", ent);
+    ccount[0] = ccount[1] = totalc = 0;
+  }
+  ccount[bit]++;
+  totalc++;
+  return(bit);
+}
+
 /*
  * Get data from GPIO. This is raw, unfiltered data, useful only for
  * diagnostics.
@@ -141,16 +164,21 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 {
   unsigned char *cptr = (unsigned char *)ptr;
   int bits, bit1, bit2;
-  unsigned int rcount=0;
+  unsigned int rcount=0, repetitions;
 
   if (!gpio_enable(ent_src))
     return(1);
   while (count--) {
     for (bits=0; bits<8; bits++) {
       *cptr <<= 1;
+      repetitions = 0;
       do {
-	bit1 = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
-	bit2 = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
+	bit1 = gpio_bit(ent_src);
+	bit2 = gpio_bit(ent_src);
+	if (repetitions++ > 1024) {
+	  message(LOG_DAEMON|LOG_ERR, "von Neumann whitening exceeded max iterations");
+	  return(1);
+	}
       } while (bit1 == bit2);
       if (bit1)
 	*cptr |= 0x01;
@@ -166,7 +194,7 @@ static int gpio_vnbytes(struct rng *ent_src, void *ptr, size_t count)
 
 #ifdef HAVE_LIBGCRYPT
 
-/* Read a 16-byte block of random data, whitened with SHA256+AES */
+/* Read a 16-byte block of random data, whitened with SHA3-256+AES */
 static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 {
   int i, bits;
@@ -178,7 +206,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
   for (i=0; i<HASH_DLEN; i++) {
     for (bits=0; bits<8; bits++) {
       byte <<= 1;
-      if (digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val) == 0)
+      if (gpio_bit(ent_src) == 0)
 	byte &= 0xfe;
       else
 	byte |= 0x01;
@@ -191,10 +219,11 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
   /* Set key to the first 128 bits of hbuf */
   if (!gcry_error)
     gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hbuf, AES_BLOCK);
-  /* Encrypt the second half of buf with the first half as key */
+  /* Encrypt the second half of buf with the first half as key,
+     send ciphertext to obuf */
   if (!gcry_error) {
     gcry_error = gcry_cipher_encrypt(gcry_cipher_hd, hbuf + AES_BLOCK,
-				     AES_BLOCK, NULL, 0);
+				     AES_BLOCK, obuf, AES_BLOCK);
   }
   if (gcry_error) {
     message(LOG_DAEMON|LOG_ERR,
@@ -202,8 +231,6 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 	    gcry_strerror(gcry_error));
     return(1);
   }
-  /* Copy encrypted result to output buffer */
-  memcpy(obuf, hbuf+AES_BLOCK, AES_BLOCK);
   gcry_md_reset(gcry_hash_hd);
   return(0);
 }
@@ -297,8 +324,6 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
   int vnlevel = ent_src->rng_options[GPIO_OPT_VL_PIN].int_val;
   int i, j, c;
   struct timespec tm;
-  long ccount[2], totalc;
-  double ent, prob;
   unsigned char buf[64];
 
   wiringPiSetup();
@@ -370,6 +395,7 @@ int init_gpiorng_entropy_source(struct rng *ent_src)
     message(LOG_DAEMON|LOG_ERR, "GPIO rng fails, entropy is below threshold\n");
     return(1);
   }
+  ccount[0] = ccount[1] = totalc = 0;
 
   if (ent_src->rng_options[GPIO_OPT_AES].int_val && init_gcrypt()) {
     ent_src->rng_options[GPIO_OPT_AES].int_val = 0;
