@@ -118,7 +118,7 @@ static double ent, prob;
 static int gpio_bit(struct rng *ent_src)
 {
   int bit = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
-  if (totalc >= 4096) {
+  if (totalc >= 1048576) {
     ent = 0.0;
     if (ccount[0] > 0 && ccount[1] > 0) {
       prob = ((double)ccount[0])/((double)totalc);
