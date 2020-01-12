@@ -30,6 +30,7 @@
 #include <wiringPi.h>
 #include <time.h>
 #include <math.h>
+#include <fcntl.h>
 #ifdef HAVE_LIBGCRYPT
 #include <gcrypt.h>
 #endif
@@ -118,7 +119,7 @@ static double ent, prob;
 static int gpio_bit(struct rng *ent_src)
 {
   int bit = digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val);
-  if (totalc >= HASH_DLEN * 1024) {
+  if (totalc >= CHUNK_SIZE * RDRAND_ROUNDS * 1024) {
     ent = 0.0;
     if (ccount[0] > 0 && ccount[1] > 0) {
       prob = ((double)ccount[0])/((double)totalc);
@@ -202,7 +203,7 @@ static unsigned int gpio_bytes(struct rng *ent_src, void *ptr, size_t count)
   while (count--) {
     for (bits=0; bits<8; bits++) {
       *cptr <<= 1;
-      if (gpio_bit(ent_src));
+      if (gpio_bit(ent_src))
 	*cptr |= 0x01;
       else
 	*cptr &= 0xfe;
@@ -246,7 +247,7 @@ static int gpio_gbytes(struct rng *ent_src, void *buf, size_t size)
   unsigned char *rdrand_ptr, *data;
   unsigned int rand_bytes;
 
-  if (gpio_enable(ent))
+  if (!gpio_enable(ent_src))
     return(1);
   while (size) {
     rand_bytes = AES_BLOCK * RDRAND_ROUNDS - rdrand_bytes;
@@ -261,6 +262,7 @@ static int gpio_gbytes(struct rng *ent_src, void *buf, size_t size)
       data = rdrand_buf + AES_BLOCK * (RDRAND_ROUNDS - 1);
       chunk = AES_BLOCK;
     } else {
+      gpio_disable(ent_src);
       return(1);
     }
     rdrand_bytes = 0;
@@ -269,7 +271,7 @@ static int gpio_gbytes(struct rng *ent_src, void *buf, size_t size)
     p += chunk;
     size -= chunk;
   }
-  gpio_disable(ent);
+  gpio_disable(ent_src);
   return(0);
 }
 
@@ -323,7 +325,6 @@ static int init_gcrypt(struct rng *ent_src)
 	    "could not initialise gcrypt: %s\n",
 	    gcry_strerror(gcry_error));
     gcry_cipher_close(gcry_cipher_hd);
-    gcry_md_close(gcry_hash_hd);
     return(1);
   }
   return(0);
