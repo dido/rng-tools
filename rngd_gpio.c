@@ -58,14 +58,14 @@
 
 /* Threshold for entropy. If entropy is below this level, we consider the RNG
    circuit failed. */
-#define ENT_THRESHOLD 0.8
+#define ENT_THRESHOLD 0.6
 
 #ifdef HAVE_LIBGCRYPT
 
 #define MIN_GCRYPT_VERSION "1.0.0"
 
-/* Get 768 bytes of raw data to hash */
-#define HASH_DLEN 96
+/* Get 1024 bytes of raw data to hash */
+#define HASH_DLEN 1024
 #define AES_BLOCK 16
 
 static gcry_cipher_hd_t gcry_cipher_hd;
@@ -171,25 +171,23 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 {
   int i, bits;
   gcry_error_t gcry_error;
-  unsigned char *hbuf;
+  unsigned char *hbuf, byte = 0;
  
   if (!gpio_enable(ent_src))
     return(1);
-  gcry_md_reset(gcry_hash_hd);
   for (i=0; i<HASH_DLEN; i++) {
-    unsigned char byte = 0;
     for (bits=0; bits<8; bits++) {
       byte <<= 1;
-      if (digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val))
-	byte |= 0x01;
-      else
+      if (digitalRead(ent_src->rng_options[GPIO_OPT_DATA_PIN].int_val) == 0)
 	byte &= 0xfe;
+      else
+	byte |= 0x01;
     }
     gcry_md_putc(gcry_hash_hd, byte);
   }
   gpio_disable(ent_src);
   gcry_error = gcry_md_final(gcry_hash_hd);
-  hbuf = gcry_md_read(gcry_hash_hd, GCRY_MD_SHA256);
+  hbuf = gcry_md_read(gcry_hash_hd, GCRY_MD_SHA3_256);
   /* Set key to the first 128 bits of hbuf */
   if (!gcry_error)
     gcry_error = gcry_cipher_setkey(gcry_cipher_hd, hbuf, AES_BLOCK);
@@ -214,6 +212,7 @@ static int gpio_readblock(struct rng *ent_src, unsigned char *obuf)
 static int gpio_gbytes(struct rng *ent_src, void *out, size_t count)
 {
   unsigned char buf[AES_BLOCK], *ptr = out;
+
   do {
     /* Obtain 16 whitened bytes from the GPIOrng */
     if (gpio_readblock(ent_src, buf))
@@ -246,7 +245,7 @@ static int init_gcrypt(void)
     return(1);
   }
 
-  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_MD_SHA256, 0);
+  gcry_error = gcry_md_open(&gcry_hash_hd, GCRY_MD_SHA3_256, 0);
 
   if (!gcry_error) {
     gcry_error = gcry_cipher_open(&gcry_cipher_hd, GCRY_CIPHER_AES128,
